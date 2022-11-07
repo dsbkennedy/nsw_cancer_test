@@ -1,4 +1,5 @@
 
+# Q1: Use SQL code to update the missing patient’s first name and last name in Patient table from stay table.
 pacman::p_load(sqldf,readxl,here)
 
 
