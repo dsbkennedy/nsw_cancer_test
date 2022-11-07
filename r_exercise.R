@@ -51,7 +51,8 @@ sim_av_tumour <- read_csv(list.files(here('data'),
    sim_av_patient %>% select(PATIENTID, NEWVITALSTATUS, VITALSTATUSDATE) %>%
    right_join(
      sim_av_tumour %>% filter(SITE_ICD10_O2_3CHAR %in% c('C34')) %>%
-       mutate(year=lubridate::year(DIAGNOSISDATEBEST)) %>% filter(year==2013) %>% 
+       mutate(year=lubridate::year(DIAGNOSISDATEBEST)) %>% 
+       filter(year==2013) %>% 
        select(PATIENTID, SITE_ICD10_O2_3CHAR, DIAGNOSISDATEBEST),
      by = c('PATIENTID')
    ) %>% 
