@@ -1,30 +1,51 @@
 ---
-title: "NSW Caner Institute pre-interview questions"
+title: "NSW Cancer Institute pre-interview questions"
 author: "David Kennedy"
 date: '2022-11-08'
 output: html_document
 ---
 
-```{r setup, include=FALSE}
+```{r setup}
 knitr::opts_chunk$set(
-	echo = FALSE,
+	echo = TRUE,
 	fig.asp = 0.8,
 	fig.height = 12,
 	fig.retina = 2,
 	fig.width = 12,
 	warning = FALSE,
+	message=FALSE,
 	dev = "jpeg",
 	dpi = 600,
 	units="cm",
 	out.width = "100%"
 )
-pacman::p_load(tidyverse,here,janitor,flextable, lubridate, survival, magrittr,patchwork)
+pacman::p_load(tidyverse,here,janitor,flextable, lubridate, survival, magrittr,patchwork,sqldf)
 
 ```
 
+# Question 1
 
+### Use SQL code to update the missing patient's first name and last name in Patient table from stay table.
 
-# Load Simulacrum data
+```{r question-1}
+raw <- here('raw_data.xlsx')
+patient <- readxl::read_xlsx(raw, sheet='patient')
+stay <- readxl::read_xlsx(raw, sheet='stay')
+
+sqldf('SELECT patient.mrn, 
+coalesce(patient."First Name", stay."First Name") AS "First Name",
+coalesce(patient."Last Name", stay."Last Name") AS "Last Name",
+patient.DOB, 
+patient.Gender
+      FROM patient  
+      LEFT JOIN stay
+      ON patient.mrn = stay.mrn')
+
+```
+
+# Question 2
+
+### Load Simulacrum data
 
 ```{r load-data}
 sim_av_patient <- read_csv(list.files(here('data'), 
@@ -38,12 +59,64 @@ sim_av_tumour <- read_csv(list.files(here('data'),
                                      full.names=T))
 ```
 
+### 2a. What is the sex distribution of patients?
 
+```{r question-2a}
 
+(sex_distribution <- sim_av_patient %>% mutate(sex_factor=factor(SEX, levels=c(1,2,9), 
+                                                                 labels=c('Males', 'Females', 'Unknown'))) %>% 
+    tabyl(sex_factor) %>% 
+    adorn_pct_formatting(digits=1) %>% 
+    flextable() %>%  
+    autofit()  %>% 
+    set_header_labels(.,
+                      sex_factor = "Sex",
+                      n = "Count", 
+                      percent = "%")
+)
+
+```
+
+### 2b. Prepare a dataset with all lung cancer patients (SITE_ICD10_O2_3CHAR= C34) and their cause of deaths.
+
+```{r}
+
+(lung_cancer_patients_cod <-
+  sim_av_patient %>% select(PATIENTID, contains('DEATHCAUSE')) %>%
+  right_join(
+    sim_av_tumour %>% filter(SITE_ICD10_O2_3CHAR == 'C34') %>%
+      select(PATIENTID, SITE_ICD10_O2_3CHAR),
+    by = c('PATIENTID')
+  )
+)
+```
+
+```{r}
+(lung_cancer_patients_2013<-
+   sim_av_patient %>% select(PATIENTID, NEWVITALSTATUS, VITALSTATUSDATE) %>%
+   right_join(
+     sim_av_tumour %>% filter(SITE_ICD10_O2_3CHAR %in% c('C34')) %>%
+       mutate(year=lubridate::year(DIAGNOSISDATEBEST)) %>% 
+       filter(year==2013) %>% 
+       select(PATIENTID, SITE_ICD10_O2_3CHAR, DIAGNOSISDATEBEST),
+     by = c('PATIENTID')
+   ) %>% 
+   mutate(
+     os_days = as.duration(DIAGNOSISDATEBEST %--% VITALSTATUSDATE) / ddays(1),
+     flag=case_when(NEWVITALSTATUS=='D' ~ 1, 
+                    TRUE ~ 0)
+   )
+)
+
+print(survfit(Surv(os_days, flag) ~ 1, data = lung_cancer_patients_2013), print.rmean=TRUE)
+
+km_fit <- survfit(Surv(os_days, flag) ~ 1, data = lung_cancer_patients_2013)
+plot(km_fit, xlab="Days", main = 'K-M Plot') 
+```
 
 # Question 3
 
-I do not have access to Power BI, so have used R to investigate the ethnicity variable. 
+I do not have access to Power BI, so have used R to investigate the ethnicity variable.
 
 ```{r data-processing}
 sim_av_patient$ETHNICITY_factor =  recode_factor(
@@ -83,7 +156,6 @@ ethnicity_data <- sim_av_patient %>%
 mycolors <- c("#002664", "#D7153A")
 ```
 
-
 ```{r column-gph}
 column_gph <- ethnicity_data %>% 
   count(known_ethnicity, sort = TRUE) %>%
@@ -107,7 +179,6 @@ column_gph <- ethnicity_data %>%
 
 ```
 
-
 ```{r point-gph}
 point_gph <- ethnicity_data %>%
   count(known_ethnicity,ETHNICITY_factor, sort = TRUE) %>%
@@ -123,7 +194,6 @@ point_gph <- ethnicity_data %>%
   scale_y_continuous(labels = scales::percent) +
     theme(legend.position='none',
       axis.line = element_blank(),
-      #axis.ticks = element_blank(),
       strip.text = element_text(face = "bold"),
       strip.background = element_rect(fill = "#CBEDFD", colour = "black", size = 1),
       panel.grid = element_blank(),
@@ -133,7 +203,6 @@ point_gph <- ethnicity_data %>%
   facet_wrap(~ (known_ethnicity), scales='free_y', ncol=1)
 
 ```
-
 
 ```{r missingness-gph}
 missingness_overtime <- ethnicity_data %>% 
@@ -150,7 +219,6 @@ missingness_overtime <- ethnicity_data %>%
     scale_x_continuous(breaks=c(2013:2019)) +
     theme(
       axis.line = element_blank(),
-      #axis.ticks = element_blank(),
       strip.text = element_text(face = "bold"),
       strip.background = element_rect(fill = "#CBEDFD", colour = "black", size = 1),
       panel.grid = element_blank(),
@@ -177,15 +245,12 @@ age_ethnicity_data <- ethnicity_data %>% select(known_ethnicity, PATIENTID) %>%
 age_ethnicity_gph <- 
     ggplot(data=age_ethnicity_data,aes(x=age_group, y=estimate)) +
     geom_col(aes(fill=factor(known_ethnicity)), position = position_dodge2())+
-    #geom_errorbar(aes(col=factor(known_ethnicity),ymin=conf.low, ymax=conf.high), width=.1, position = position_dodge2(.9, padding = .6), size=2) +
     theme_bw() +
     scale_fill_manual(values=mycolors) +
-    #scale_y_continuous(labels = scales::percent) +
     scale_y_continuous(labels = scales::percent, breaks=seq(from = 0, to = 1, by = .1)) +
     labs(x='Age group', title='Completeness of ethnicity data varies by age group', y='', fill='') +
     theme(legend.position = c(0.87, 0.9),legend.key.size = unit(0.5, 'cm'),legend.text = element_text(size=8),
           axis.line = element_blank(),
-          #axis.ticks = element_blank(),
           strip.text = element_text(face = "bold"),
           strip.background = element_rect(fill = "#CBEDFD", colour = "black", size = 1),
           panel.grid = element_blank(),
@@ -202,4 +267,3 @@ patchwork3 + plot_annotation(
   caption = 'Data source: Simulacrum',
   theme = theme(plot.title = element_text(size = 18))) 
 ```
-
